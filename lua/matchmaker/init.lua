@@ -128,10 +128,54 @@ local function next_group() --{{{
   return mappings[last_group]["group"]
 end --}}}
 
+local function matchadd_all_windows(group, term) --{{{
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    if vim.api.nvim_win_is_valid(win) then
+      vim.api.nvim_win_call(win, function()
+        vim.fn.matchadd(group, term)
+      end)
+    end
+  end
+end --}}}
+
+local function matching_groups() --{{{
+  local groups = _t()
+  mappings:map(function(v)
+    groups[v.group] = v.color
+  end)
+  return groups
+end --}}}
+
+local function matchdelete_current_window(groups) --{{{
+  _t(vim.fn.getmatches())
+    :filter(function(v)
+      return v and groups[v.group]
+    end)
+    :map(function(v)
+      vim.fn.matchdelete(v.id)
+    end)
+end --}}}
+
+local function matchdelete_all_windows(groups) --{{{
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    if vim.api.nvim_win_is_valid(win) then
+      vim.api.nvim_win_call(win, function()
+        matchdelete_current_window(groups)
+      end)
+    end
+  end
+end --}}}
+
 -- selene: allow(global_usage)
 function _G.add_match_partial() --{{{
   local term = vim.fn.expand("<cword>")
   vim.fn.matchadd(next_group(), term)
+end --}}}
+
+-- selene: allow(global_usage)
+function _G.add_match_partial_all_windows() --{{{
+  local term = vim.fn.expand("<cword>")
+  matchadd_all_windows(next_group(), term)
 end --}}}
 
 -- selene: allow(global_usage)
@@ -141,10 +185,23 @@ function _G.add_match_exact() --{{{
   vim.fn.matchadd(next_group(), term)
 end --}}}
 
+-- selene: allow(global_usage)
+function _G.add_match_exact_all_windows() --{{{
+  local term = vim.fn.expand("<cword>")
+  term = "\\<" .. term .. "\\>"
+  matchadd_all_windows(next_group(), term)
+end --}}}
+
 local function add_match_visual() --{{{
   local term = quick.selection_contents()
   term = term:gsub("\n", "\\_.")
   vim.fn.matchadd(next_group(), term)
+end --}}}
+
+local function add_match_visual_all_windows() --{{{
+  local term = quick.selection_contents()
+  term = term:gsub("\n", "\\_.")
+  matchadd_all_windows(next_group(), term)
 end --}}}
 
 -- selene: allow(global_usage)
@@ -155,31 +212,49 @@ end --}}}
 
 -- stylua: ignore start
 local defaults = { --{{{
-  add     = "<leader>ma",
-  exact   = "<leader>me",
-  pattern = "<leader>mp",
-  line    = "<leader>ml",
-  clear   = "<leader>mc",
-  delete  = "<leader>md",
+  add                 = "<leader>ma",
+  add_all_windows     = "<leader>mA",
+  exact               = "<leader>me",
+  exact_all_windows   = "<leader>mE",
+  pattern             = "<leader>mp",
+  pattern_all_windows = "<leader>mP",
+  line                = "<leader>ml",
+  clear               = "<leader>mc",
+  clear_all_windows   = "<leader>mC",
+  delete              = "<leader>md",
+  delete_all_windows  = "<leader>mD",
 } --}}}
 
 local function setup(opts)
   opts = vim.tbl_extend("force", defaults, opts or {})
   local strings = { "string", "nil", "boolean" }
   vim.validate({ --{{{
-    opts    = { opts,         "table" },
-    add     = { opts.add,     strings },
-    exact   = { opts.exact,   strings },
-    pattern = { opts.pattern, strings },
-    line    = { opts.line,    strings },
-    clear   = { opts.clear,   strings },
-    delete  = { opts.delete,  strings },
+    opts                = { opts,                     "table" },
+    add                 = { opts.add,                 strings },
+    add_all_windows     = { opts.add_all_windows,     strings },
+    exact               = { opts.exact,               strings },
+    exact_all_windows   = { opts.exact_all_windows,   strings },
+    pattern             = { opts.pattern,             strings },
+    pattern_all_windows = { opts.pattern_all_windows, strings },
+    line                = { opts.line,                strings },
+    clear               = { opts.clear,               strings },
+    clear_all_windows   = { opts.clear_all_windows,   strings },
+    delete              = { opts.delete,              strings },
+    delete_all_windows  = { opts.delete_all_windows,  strings },
   }) --}}}
 
   if opts.add then --{{{
     local desc = "Add any matches containing a word under the cursor"
     vim.keymap.set("n", opts.add, function()
       vim.opt.opfunc = "v:lua.add_match_partial"
+      return "g@<cr>"
+    end, { expr = true, desc = desc })
+  end --}}}
+
+  if opts.add_all_windows then --{{{
+    local desc = "Add any matches containing a word under the cursor in every opened window"
+    vim.keymap.set("n", opts.add_all_windows, function()
+      vim.opt.opfunc = "v:lua.add_match_partial_all_windows"
       return "g@<cr>"
     end, { expr = true, desc = desc })
   end --}}}
@@ -191,6 +266,15 @@ local function setup(opts)
       return "g@<cr>"
     end, { expr = true, desc = desc })
     vim.keymap.set("x", opts.exact, add_match_visual, {  desc = desc })
+  end --}}}
+
+  if opts.exact_all_windows then --{{{
+    local desc = "Add exact matches in every opened window"
+    vim.keymap.set("n", opts.exact_all_windows, function()
+      vim.opt.opfunc = "v:lua.add_match_exact_all_windows"
+      return "g@<cr>"
+    end, { expr = true, desc = desc })
+    vim.keymap.set("x", opts.exact_all_windows, add_match_visual_all_windows, { desc = desc })
   end --}}}
 
   if opts.pattern then --{{{
@@ -206,6 +290,19 @@ local function setup(opts)
     end, { desc = "Add any matches containing the input from user" })
   end --}}}
 
+  if opts.pattern_all_windows then --{{{
+    vim.keymap.set("n", opts.pattern_all_windows, function()
+      vim.ui.input({
+        prompt = "Pattern: ",
+      }, function(term)
+          if term then
+            matchadd_all_windows(next_group(), term)
+          end
+         end
+      )
+    end, { desc = "Add any matches containing the input from user in every opened window" })
+  end --}}}
+
   if opts.line then --{{{
     local desc = "Add current line"
     vim.keymap.set("n", opts.line, function()
@@ -216,28 +313,20 @@ local function setup(opts)
 
   if opts.clear then --{{{
     vim.keymap.set("n", opts.clear, function()
-      local groups = _t()
-      mappings:map(function(v)
-        groups[v.group] = true
-      end)
+      matchdelete_current_window(matching_groups())
+    end, { desc = "Clear all matches of the current window" })
+  end --}}}
 
-      _t(vim.fn.getmatches())
-        :filter(function(v)
-          return v and groups[v.group]
-        end)
-        :map(function(v)
-          vim.fn.matchdelete(v.id)
-        end)
-    end, { desc = "Clear all matches of the current buffer" })
+  if opts.clear_all_windows then --{{{
+    vim.keymap.set("n", opts.clear_all_windows, function()
+      matchdelete_all_windows(matching_groups())
+    end, { desc = "Clear all matches in every opened window" })
   end --}}}
 
   if opts.delete then --{{{
     vim.keymap.set("n", opts.delete, function()
       local source = _t()
-      local groups = _t()
-      mappings:map(function(v)
-        groups[v.group] = v.color
-      end)
+      local groups = matching_groups()
 
       _t(vim.fn.getmatches())
         :filter(function(v)
@@ -276,6 +365,71 @@ local function setup(opts)
       end
       vim.fn["fzf#run"](wrap)
     end, { desc = "List all matches and remove by user's selection" })
+  end --}}}
+
+  if opts.delete_all_windows then --{{{
+    vim.keymap.set("n", opts.delete_all_windows, function()
+      local source = _t()
+      local groups = matching_groups()
+
+      for _, win in ipairs(vim.api.nvim_list_wins()) do
+        if vim.api.nvim_win_is_valid(win) then
+          local tab = vim.api.nvim_win_get_tabpage(win)
+          local tabnr = vim.api.nvim_tabpage_get_number(tab)
+          local winnr = vim.api.nvim_win_get_number(win)
+          vim.api.nvim_win_call(win, function()
+            _t(vim.fn.getmatches())
+              :filter(function(v)
+                return v and groups[v.group]
+              end)
+              :sort(function(a, b)
+                return a.id > b.id
+              end)
+              :map(function(v)
+                local str = string.format(
+                  "%d\t%2d\ttab %d win %d\t%50s\t%20s",
+                  win,
+                  v.id,
+                  tabnr,
+                  winnr,
+                  v.pattern,
+                  groups[v.group]
+                )
+                table.insert(source, str)
+              end)
+          end)
+        end
+      end
+
+      if #source == 0 then
+        return
+      end
+
+      local wrap = vim.fn["fzf#wrap"]({
+        source = source,
+        options = table.concat({
+          "--multi",
+          "--bind",
+          "ctrl-a:select-all+accept ",
+          "--layout reverse-list",
+          '--delimiter="\t"',
+          "--with-nth=3..",
+        }, " "),
+      })
+      wrap["sink*"] = function(list)
+        for _, name in pairs(list) do
+          local win, id = string.match(name, "^%s*(%d+)\t%s*(%d+)")
+          win = tonumber(win)
+          id = tonumber(id)
+          if win ~= nil and id ~= nil and vim.api.nvim_win_is_valid(win) then
+            vim.api.nvim_win_call(win, function()
+              pcall(vim.fn.matchdelete, id)
+            end)
+          end
+        end
+      end
+      vim.fn["fzf#run"](wrap)
+    end, { desc = "List matches from every opened window and remove by user's selection" })
   end --}}}
 end
 
